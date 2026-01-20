@@ -1,0 +1,13 @@
+export const HID_CONSTANTS = {
+  VENDOR_ID: 0x0483,
+  PRODUCT_ID: 0x5732,
+  USAGE_PAGE: 0xff00,
+  REPORT_SIZE: 64,
+  
+  REPORT_ID: {
+    GET_LICENSE_IN: 0x01,
+    GET_LICENSE_OUT: 0x02,
+    GET_COUNTER_IN: 0x03,
+    GET_COUNTER_OUT: 0x04,
+  },
+};
