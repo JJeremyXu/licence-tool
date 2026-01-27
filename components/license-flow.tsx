@@ -9,6 +9,8 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Loader2, Check, Usb, Key, FileJson, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
 
 // Helper to format hex string
 const toHex = (data: Uint8Array) => Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -20,16 +22,31 @@ const fromHex = (hex: string) => {
     return bytes;
 };
 
-// Default Test UUID (128 bytes) - just repeating pattern for demo if needed
-const MOCK_UUID = new Uint8Array(128).map((_, i) => i % 255); 
-const MOCK_UUID_STR = toHex(MOCK_UUID);
+
 
 export function LicenseFlow() {
   const { connect, disconnect, connectionState, client } = useHID();
   const [currentStep, setCurrentStep] = useState(1);
-  const [uuidInput, setUuidInput] = useState(MOCK_UUID_STR);
+  const [uuidInput, setUuidInput] = useState<string>(''); 
   const [licenseData, setLicenseData] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Target Device State
+  const [targetDevice, setTargetDevice] = useState<HIDDevice | null>(null);
+  const [targetLogs, setTargetLogs] = useState<{direction: 'tx' | 'rx', data: string, time: string}[]>([]);
+  const [reportIdInput, setReportIdInput] = useState('00');
+  const [reportDataInput, setReportDataInput] = useState('');
+  const [featureReportIdInput, setFeatureReportIdInput] = useState('00');
+  const [featureReportDataInput, setFeatureReportDataInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'report' | 'feature' | 'logs'>('report');
+
+  const addToLog = (direction: 'tx' | 'rx', data: string) => {
+      setTargetLogs(prev => [...prev, {
+          direction,
+          data,
+          time: new Date().toLocaleTimeString()
+      }]);
+  };
 
   // Step 1: Connection
   const handleConnect = async () => {
@@ -50,11 +67,65 @@ export function LicenseFlow() {
   };
 
   // Step 2: Read UUID (Mock for now as per plan gap)
+  // Step 2: Read UUID (Manual)
   const handleReadUUID = () => {
-    // In real app, this would read from Target Device
-    toast.info("Simulating UUID read from Target Device (Earbud)...");
-    setUuidInput(MOCK_UUID_STR);
-    toast.success("UUID Read Successfully");
+    toast.info("Please use the Target Device controls below to read the UUID manually.");
+  };
+
+  // Target Device Connection
+  const handleConnectTarget = async () => {
+      try {
+          const devices = await navigator.hid.requestDevice({ filters: [] });
+          if (devices.length > 0) {
+              const device = devices[0];
+              await device.open();
+              setTargetDevice(device);
+              toast.success(`Connected to ${device.productName}`);
+
+              device.addEventListener('inputreport', (e) => {
+                  const { data, reportId } = e;
+                  const bytes = new Uint8Array(data.buffer);
+                  const hex = toHex(bytes);
+                  addToLog('rx', `[ID:${reportId}] ${hex}`);
+              });
+          }
+      } catch (err: any) {
+          toast.error(`Failed to connect: ${err.message}`);
+      }
+  };
+
+  const handleDisconnectTarget = async () => {
+      if (targetDevice) {
+          await targetDevice.close();
+          setTargetDevice(null);
+          toast.success("Target Device Disconnected");
+      }
+  };
+
+  const handleSendReport = async () => {
+      if (!targetDevice) return;
+      try {
+          const id = parseInt(reportIdInput, 16);
+          const data = fromHex(reportDataInput.replace(/\s/g, ''));
+          await targetDevice.sendReport(id, data);
+          addToLog('tx', `[ID:${id}] ${toHex(data)}`);
+          toast.success("Report Sent");
+      } catch (e: any) {
+          toast.error("Send Failed: " + e.message);
+      }
+  };
+
+  const handleSendFeatureReport = async () => {
+    if (!targetDevice) return;
+    try {
+        const id = parseInt(featureReportIdInput, 16);
+        const data = fromHex(featureReportDataInput.replace(/\s/g, ''));
+        await targetDevice.sendFeatureReport(id, data);
+        addToLog('tx', `[Feature ID:${id}] ${toHex(data)}`);
+        toast.success("Feature Report Sent");
+    } catch (e: any) {
+        toast.error("Send Failed: " + e.message);
+    }
   };
 
   const handleConfirmUUID = () => {
@@ -90,12 +161,9 @@ export function LicenseFlow() {
   };
 
   // Step 4: Write License (Mock)
+  // Step 4: Write License (Manual)
   const handleWriteLicense = () => {
-     setIsProcessing(true);
-     setTimeout(() => {
-         setIsProcessing(false);
-         toast.success("License written to Target Device!");
-     }, 1000);
+     toast.info("Please use the Target Device controls below to write the license manually.");
   };
 
   const steps = [
@@ -250,6 +318,106 @@ export function LicenseFlow() {
             )}
 
         </CardContent>
+      </Card>
+
+      {/* Target Device Interaction Area */}
+      <Card>
+          <CardHeader>
+              <CardTitle>Target Device Interaction</CardTitle>
+              <CardDescription>
+                  Manually interact with the target device to read UUID and write License.
+              </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+              <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
+                  <div className={`w-3 h-3 rounded-full ${targetDevice ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <div className="flex-1">
+                      <p className="font-medium">Status: {targetDevice ? `Connected: ${targetDevice.productName}` : 'Disconnected'}</p>
+                  </div>
+                  {!targetDevice ? (
+                      <Button onClick={handleConnectTarget}>Connect Target Device</Button>
+                  ) : (
+                      <Button variant="outline" onClick={handleDisconnectTarget}>Disconnect</Button>
+                  )}
+              </div>
+
+              {targetDevice && (
+                  <div className="space-y-4">
+                      <div className="flex space-x-2 border-b pb-2">
+                          <Button 
+                              variant={activeTab === 'report' ? 'default' : 'ghost'} 
+                              size="sm" 
+                              onClick={() => setActiveTab('report')}
+                          >
+                              Send Report
+                          </Button>
+                          <Button 
+                              variant={activeTab === 'feature' ? 'default' : 'ghost'} 
+                              size="sm" 
+                              onClick={() => setActiveTab('feature')}
+                          >
+                              Send Feature Report
+                          </Button>
+                          <Button 
+                              variant={activeTab === 'logs' ? 'default' : 'ghost'} 
+                              size="sm" 
+                              onClick={() => setActiveTab('logs')}
+                          >
+                              Logs
+                          </Button>
+                      </div>
+                      
+                      {activeTab === 'report' && (
+                          <div className="space-y-4">
+                              <div className="grid grid-cols-4 gap-4">
+                                  <div className="col-span-1">
+                                      <Label>Report ID (Hex)</Label>
+                                      <Input value={reportIdInput} onChange={e => setReportIdInput(e.target.value)} />
+                                  </div>
+                                  <div className="col-span-3">
+                                      <Label>Data (Hex)</Label>
+                                      <Input value={reportDataInput} onChange={e => setReportDataInput(e.target.value)} placeholder="00 11 22..." />
+                                  </div>
+                              </div>
+                              <Button onClick={handleSendReport}>Send Report</Button>
+                          </div>
+                      )}
+
+                      {activeTab === 'feature' && (
+                          <div className="space-y-4">
+                              <div className="grid grid-cols-4 gap-4">
+                                  <div className="col-span-1">
+                                      <Label>Report ID (Hex)</Label>
+                                      <Input value={featureReportIdInput} onChange={e => setFeatureReportIdInput(e.target.value)} />
+                                  </div>
+                                  <div className="col-span-3">
+                                      <Label>Data (Hex)</Label>
+                                      <Input value={featureReportDataInput} onChange={e => setFeatureReportDataInput(e.target.value)} placeholder="00 11 22..." />
+                                  </div>
+                              </div>
+                              <Button onClick={handleSendFeatureReport}>Send Feature Report</Button>
+                          </div>
+                      )}
+
+                      {activeTab === 'logs' && (
+                          <div>
+                              <ScrollArea className="h-[200px] w-full rounded-md border p-4">
+                                  {targetLogs.map((log, i) => (
+                                      <div key={i} className="text-xs font-mono mb-1">
+                                          <span className="text-muted-foreground">[{log.time}]</span>
+                                          <span className={log.direction === 'tx' ? 'text-blue-500' : 'text-green-500'}>
+                                              {log.direction === 'tx' ? ' -> ' : ' <- '}
+                                          </span>
+                                          {log.data}
+                                      </div>
+                                  ))}
+                              </ScrollArea>
+                              <Button variant="ghost" size="sm" onClick={() => setTargetLogs([])} className="mt-2">Clear Logs</Button>
+                          </div>
+                      )}
+                  </div>
+              )}
+          </CardContent>
       </Card>
     </div>
   );
