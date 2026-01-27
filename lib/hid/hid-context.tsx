@@ -54,6 +54,7 @@ export const HIDProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setConnectionState(prev => ({ ...prev, error: err.message }));
       // Log handled in client for some parts, but top level error:
       // clientRef.current.log('error', `Connection failed: ${err.message}`);
+      throw err;
     }
   }, []);
   

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useHID } from '@/lib/hid/hid-context';
 import { MockDeviceClient } from '@/lib/hid/mock-device-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +22,8 @@ export default function AutoLicensePage() {
   const [progress, setProgress] = useState(0);
   const [uuid, setUuid] = useState<Uint8Array | null>(null);
   const [license, setLicense] = useState<Uint8Array | null>(null);
+
+
 
   const handleConnectDongle = async () => {
     try {
@@ -47,7 +49,7 @@ export default function AutoLicensePage() {
     toast.success('Target Device connected (Mock)');
   };
 
-  const handleCheckCounter = async () => {
+  const handleCheckCounter = useCallback(async () => {
     if (!client) {
       toast.error('Dongle not connected');
       return;
@@ -65,7 +67,13 @@ export default function AutoLicensePage() {
       const error = e as Error;
       toast.error('Counter check failed: ' + error.message);
     }
-  };
+  }, [client]);
+
+  useEffect(() => {
+    if (connectionState.isConnected && client) {
+      handleCheckCounter();
+    }
+  }, [connectionState.isConnected, client, handleCheckCounter]);
 
   const handleStartProcess = async () => {
     if (!client || !mockDevice) {
