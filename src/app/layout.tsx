@@ -30,6 +30,21 @@ export default function RootLayout({
       >
         {children}
         <Toaster />
+        <footer className="fixed bottom-2 right-2 text-xs text-muted-foreground/50 font-mono">
+          {process.env.NEXT_PUBLIC_COMMIT_HASH && (
+            <p className="text-xs text-muted-foreground">
+              {' '}
+              <a
+                href={`https://github.com/orosound/license-app-web/commit/${process.env.NEXT_PUBLIC_COMMIT_HASH}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline hover:text-primary"
+              >
+                {process.env.NEXT_PUBLIC_COMMIT_HASH}
+              </a>
+            </p>
+          )}
+        </footer>
       </body>
     </html>
   );

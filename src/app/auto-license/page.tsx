@@ -31,6 +31,17 @@ export default function AutoLicensePage() {
     }
   };
 
+  const handleDisconnectDongle = async () => {
+    try {
+      await dongle.disconnect();
+      setCounter(null);
+      toast.info('License Dongle disconnected');
+    } catch (e) {
+      const error = e as Error;
+      toast.error('Failed to disconnect Dongle: ' + error.message);
+    }
+  };
+
   const handleConnectTarget = async () => {
     try {
       await target.connect();
@@ -38,6 +49,16 @@ export default function AutoLicensePage() {
     } catch (e) {
       const error = e as Error;
       toast.error('Failed to connect Target Device: ' + error.message);
+    }
+  };
+
+  const handleDisconnectTarget = async () => {
+    try {
+      await target.disconnect();
+      toast.info('Target Device disconnected');
+    } catch (e) {
+      const error = e as Error;
+      toast.error('Failed to disconnect Target Device: ' + error.message);
     }
   };
 
@@ -171,9 +192,14 @@ export default function AutoLicensePage() {
                     Connect
                   </Button>
                 ) : (
-                  <Button size="sm" variant="outline" onClick={handleCheckCounter} className="flex-1">
-                    Refresh Counter
-                  </Button>
+                  <>
+                    <Button size="sm" variant="outline" onClick={handleCheckCounter} className="flex-1">
+                      Refresh Counter
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={handleDisconnectDongle}>
+                      Disconnect
+                    </Button>
+                  </>
                 )}
               </div>
             </CardContent>
@@ -197,14 +223,17 @@ export default function AutoLicensePage() {
                   )}
                 </Badge>
               </div>
-              <Button 
-                size="sm" 
-                onClick={handleConnectTarget} 
-                disabled={target.connectionState.isConnected}
-                className="w-full"
-              >
-                {target.connectionState.isConnected ? 'Connected' : 'Connect'}
-              </Button>
+              <div className="flex gap-2">
+                {!target.connectionState.isConnected ? (
+                  <Button size="sm" onClick={handleConnectTarget} className="flex-1">
+                    Connect
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="destructive" onClick={handleDisconnectTarget} className="flex-1">
+                    Disconnect
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
