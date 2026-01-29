@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback } from 'react';
 import { DongleClient, TargetDeviceClient, AbstractHIDClient } from './hid-client';
 import { LogEntry, DeviceConnectionState } from './types';
 
@@ -45,20 +45,15 @@ export const HIDProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const clearLogs = useCallback(() => setLogs([]), []);
 
   // ---- Dongle State ----
-  const [dongleClient, setDongleClient] = useState<DongleClient | null>(null);
+  // Use lazy initialization to avoid calling setState in useEffect
+  const [dongleClient] = useState<DongleClient>(() => new DongleClient(addLog));
   const [dongleState, setDongleState] = useState<DeviceConnectionState>({
     isConnected: false,
     device: null,
     error: null,
   });
 
-  // Initialize dongle client once on mount
-  useEffect(() => {
-    setDongleClient(new DongleClient(addLog));
-  }, [addLog]);
-
   const connectDongle = useCallback(async () => {
-    if (!dongleClient) return;
     try {
       const device = await dongleClient.connect();
       setDongleState({
@@ -78,31 +73,24 @@ export const HIDProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [dongleClient]);
 
   const disconnectDongle = useCallback(async () => {
-    if (dongleClient) {
-      await dongleClient.disconnect();
-      setDongleState({
-        isConnected: false,
-        device: null,
-        error: null,
-      });
-    }
+    await dongleClient.disconnect();
+    setDongleState({
+      isConnected: false,
+      device: null,
+      error: null,
+    });
   }, [dongleClient]);
 
   // ---- Target State ----
-  const [targetClient, setTargetClient] = useState<TargetDeviceClient | null>(null);
+  // Use lazy initialization to avoid calling setState in useEffect
+  const [targetClient] = useState<TargetDeviceClient>(() => new TargetDeviceClient(addLog));
   const [targetState, setTargetState] = useState<DeviceConnectionState>({
     isConnected: false,
     device: null,
     error: null,
   });
 
-  // Initialize target client once on mount
-  useEffect(() => {
-    setTargetClient(new TargetDeviceClient(addLog));
-  }, [addLog]);
-
   const connectTarget = useCallback(async () => {
-    if (!targetClient) return;
     try {
       const device = await targetClient.connect();
       setTargetState({
@@ -122,14 +110,12 @@ export const HIDProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [targetClient]);
 
   const disconnectTarget = useCallback(async () => {
-    if (targetClient) {
-      await targetClient.disconnect();
-      setTargetState({
-        isConnected: false,
-        device: null,
-        error: null,
-      });
-    }
+    await targetClient.disconnect();
+    setTargetState({
+      isConnected: false,
+      device: null,
+      error: null,
+    });
   }, [targetClient]);
 
   // ---- Build Context Value ----
