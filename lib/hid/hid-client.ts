@@ -19,6 +19,21 @@ export class HIDClient {
     });
   }
 
+  private logPacket(type: 'tx' | 'rx', reportId: number, data: Uint8Array) {
+      // Format: (TX) (64 bytes) [81] [01 23 45 ...]
+      // We assume data is the payload. Total length = payload + 1 (Report ID).
+      // Note: DebugConsole adds Timestamp.
+      
+      const totalLen = data.byteLength + 1; 
+      const idHex = reportId.toString(16).padStart(2, '0').toUpperCase();
+      const dataHex = Array.from(data).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      
+      const message = `(${totalLen} bytes) [${idHex}] [${dataHex}]`;
+      
+      // We pass undefined for 'data' in LogEntry so DebugConsole doesn't print it again on new line
+      this.log(type, message, undefined);
+  }
+
   async connect(): Promise<HIDDevice> {
     if (!navigator.hid) {
       throw new Error("WebHID is not supported in this browser.");
@@ -94,7 +109,7 @@ export class HIDClient {
     
     // I will write a lower level `sendPacket` that takes constructed 63 bytes.
     
-    this.log('tx', `Sending Report ${reportId}`, data);
+    this.logPacket('tx', reportId, data);
     // @ts-expect-error Data is BufferSource
     await this.device.sendReport(reportId, data);
   }
@@ -118,7 +133,7 @@ export class HIDClient {
           // event.data matches the payload (without report ID).
           // We return the raw data view.
           const data = new Uint8Array(event.data.buffer);
-          this.log('rx', `Received Report ${event.reportId}`, data);
+          this.logPacket('rx', event.reportId, data);
           cleanup();
           resolve(data);
         }
