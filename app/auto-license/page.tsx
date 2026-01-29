@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useHID } from '@/lib/hid/hid-context';
-
-import { TargetDeviceClient } from '@/lib/hid/hid-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,48 +14,41 @@ import { toast } from 'sonner';
 type ProcessStep = 'idle' | 'get-uuid' | 'get-counter' | 'generate-license' | 'write-license' | 'complete' | 'error';
 
 export default function AutoLicensePage() {
-  const { connect, connectionState, client } = useHID();
-  const [mockDevice, setMockDevice] = useState<TargetDeviceClient | null>(null);
+  const { dongle, target } = useHID();
   const [counter, setCounter] = useState<number | null>(null);
   const [currentStep, setCurrentStep] = useState<ProcessStep>('idle');
   const [progress, setProgress] = useState(0);
   const [uuid, setUuid] = useState<Uint8Array | null>(null);
   const [license, setLicense] = useState<Uint8Array | null>(null);
 
-
-
   const handleConnectDongle = async () => {
     try {
-      await connect();
+      await dongle.connect();
       toast.success('License Dongle connected');
     } catch (e) {
       const error = e as Error;
       toast.error('Failed to connect Dongle: ' + error.message);
     }
   };
-  const handleConnectDevice = async () => {
-    // For now, create client with inline logging until we refactor context
-    const target = new TargetDeviceClient((log) => {
-      console.log('[Target Device]', log);
-    });
-    
+
+  const handleConnectTarget = async () => {
     try {
-        await target.connect();
-        setMockDevice(target);
-        toast.success('Target Device connected');
-    } catch (e: any) {
-        toast.error('Failed to connect Target Device: ' + e.message);
+      await target.connect();
+      toast.success('Target Device connected');
+    } catch (e) {
+      const error = e as Error;
+      toast.error('Failed to connect Target Device: ' + error.message);
     }
   };
 
   const handleCheckCounter = useCallback(async () => {
-    if (!client) {
+    if (!dongle.client) {
       toast.error('Dongle not connected');
       return;
     }
 
     try {
-      const counterValue = await client.getCounter();
+      const counterValue = await dongle.client.getCounter();
       if (counterValue !== null) {
         setCounter(counterValue);
         toast.success(`Counter: ${counterValue}`);
@@ -68,16 +59,16 @@ export default function AutoLicensePage() {
       const error = e as Error;
       toast.error('Counter check failed: ' + error.message);
     }
-  }, [client]);
+  }, [dongle.client]);
 
   useEffect(() => {
-    if (connectionState.isConnected && client) {
+    if (dongle.connectionState.isConnected && dongle.client) {
       handleCheckCounter();
     }
-  }, [connectionState.isConnected, client, handleCheckCounter]);
+  }, [dongle.connectionState.isConnected, dongle.client, handleCheckCounter]);
 
   const handleStartProcess = async () => {
-    if (!client || !mockDevice) {
+    if (!dongle.client || !target.client) {
       toast.error('Please connect both devices first');
       return;
     }
@@ -92,14 +83,14 @@ export default function AutoLicensePage() {
       setCurrentStep('get-uuid');
       setProgress(25);
       toast.info('Step 1: Reading UUID from device (0x80 -> 0x81)...');
-      const deviceUuid = await mockDevice.readUUID();
+      const deviceUuid = await target.client.readUUID();
       setUuid(deviceUuid);
 
       // Step 2: Get Counter (already done, but refresh)
       setCurrentStep('get-counter');
       setProgress(40);
       toast.info('Step 2: Checking counter...');
-      const newCounter = await client.getCounter();
+      const newCounter = await dongle.client.getCounter();
       if (newCounter === null || newCounter <= 0) {
         throw new Error('Counter check failed or no licenses available');
       }
@@ -110,15 +101,15 @@ export default function AutoLicensePage() {
       setProgress(60);
       toast.info('Step 3: Generating license...');
       
-      await client.sendFragmentedData(deviceUuid);
-      const generatedLicense = await client.receiveFragmentedData();
+      await dongle.client.sendFragmentedData(deviceUuid);
+      const generatedLicense = await dongle.client.receiveFragmentedData();
       setLicense(generatedLicense);
 
       // Step 4: Write License to Device
       setCurrentStep('write-license');
       setProgress(85);
       toast.info('Step 4: Writing license to device...');
-      await mockDevice.writeLicense(generatedLicense);
+      await target.client.writeLicense(generatedLicense);
 
       // Complete
       setCurrentStep('complete');
@@ -133,7 +124,7 @@ export default function AutoLicensePage() {
     }
   };
 
-  const isReady = connectionState.isConnected && mockDevice !== null && counter !== null && counter > 0;
+  const isReady = dongle.connectionState.isConnected && target.connectionState.isConnected && counter !== null && counter > 0;
   const isProcessing = currentStep !== 'idle' && currentStep !== 'complete' && currentStep !== 'error';
 
   return (
@@ -158,15 +149,15 @@ export default function AutoLicensePage() {
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm">Status:</span>
-                <Badge variant={connectionState.isConnected ? 'default' : 'secondary'}>
-                  {connectionState.isConnected ? (
+                <Badge variant={dongle.connectionState.isConnected ? 'default' : 'secondary'}>
+                  {dongle.connectionState.isConnected ? (
                     <><CheckCircle2 className="w-3 h-3 mr-1" /> Connected</>
                   ) : (
                     <><XCircle className="w-3 h-3 mr-1" /> Disconnected</>
                   )}
                 </Badge>
               </div>
-              {connectionState.isConnected && (
+              {dongle.connectionState.isConnected && (
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Counter:</span>
                   <Badge variant={counter !== null && counter > 0 ? 'default' : 'destructive'}>
@@ -175,7 +166,7 @@ export default function AutoLicensePage() {
                 </div>
               )}
               <div className="flex gap-2">
-                {!connectionState.isConnected ? (
+                {!dongle.connectionState.isConnected ? (
                   <Button size="sm" onClick={handleConnectDongle} className="flex-1">
                     Connect
                   </Button>
@@ -198,8 +189,8 @@ export default function AutoLicensePage() {
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm">Status:</span>
-                <Badge variant={mockDevice ? 'default' : 'secondary'}>
-                  {mockDevice ? (
+                <Badge variant={target.connectionState.isConnected ? 'default' : 'secondary'}>
+                  {target.connectionState.isConnected ? (
                     <><CheckCircle2 className="w-3 h-3 mr-1" /> Connected</>
                   ) : (
                     <><XCircle className="w-3 h-3 mr-1" /> Disconnected</>
@@ -208,11 +199,11 @@ export default function AutoLicensePage() {
               </div>
               <Button 
                 size="sm" 
-                onClick={handleConnectDevice} 
-                disabled={!!mockDevice}
+                onClick={handleConnectTarget} 
+                disabled={target.connectionState.isConnected}
                 className="w-full"
               >
-                {mockDevice ? 'Connected' : 'Connect'}
+                {target.connectionState.isConnected ? 'Connected' : 'Connect'}
               </Button>
             </CardContent>
           </Card>
@@ -232,9 +223,9 @@ export default function AutoLicensePage() {
                 <Info className="h-4 w-4" />
                 <AlertTitle>Setup Required</AlertTitle>
                 <AlertDescription>
-                  {!connectionState.isConnected && '• Connect License Dongle\n'}
-                  {!mockDevice && '• Connect Target Device\n'}
-                  {connectionState.isConnected && (counter === null || counter <= 0) && '• Check counter (must be > 0)'}
+                  {!dongle.connectionState.isConnected && '• Connect License Dongle\n'}
+                  {!target.connectionState.isConnected && '• Connect Target Device\n'}
+                  {dongle.connectionState.isConnected && (counter === null || counter <= 0) && '• Check counter (must be > 0)'}
                 </AlertDescription>
               </Alert>
             )}

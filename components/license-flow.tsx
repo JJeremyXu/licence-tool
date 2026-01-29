@@ -11,7 +11,6 @@ import { Loader2, Check, Usb, Key, FileJson, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { TargetDeviceClient } from '@/lib/hid/hid-client';
 
 // Helper to format hex string
 const toHex = (data: Uint8Array) => Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -23,48 +22,48 @@ const fromHex = (hex: string) => {
     return bytes;
 };
 
-
-
 export function LicenseFlow() {
-  const { connect, disconnect, connectionState, client } = useHID();
+  const { dongle, target, logs, clearLogs } = useHID();
   const [currentStep, setCurrentStep] = useState(1);
   const [uuidInput, setUuidInput] = useState<string>(''); 
   const [licenseData, setLicenseData] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Target Device State
-  // We use TargetDeviceClient to wrap the device interaction including logging
-  const [targetClient, setTargetClient] = useState<TargetDeviceClient | null>(null);
-  // We can still use local logs or rely on the client's callback. 
-  // The client callback approach is cleaner.
-  const [targetLogs, setTargetLogs] = useState<{direction: 'tx' | 'rx', data: string, time: string}[]>([]);
+  // Target Device UI State
   const [reportIdInput, setReportIdInput] = useState('00');
   const [reportDataInput, setReportDataInput] = useState('');
   const [featureReportIdInput, setFeatureReportIdInput] = useState('00');
   const [featureReportDataInput, setFeatureReportDataInput] = useState('');
   const [activeTab, setActiveTab] = useState<'report' | 'feature' | 'logs'>('report');
-  // Helper functions for logging removed as we use client callback directly in handler
-
 
   // Step 1: Connection
   const handleConnect = async () => {
-    await connect();
-  };
-
-  const handleTestConnection = async () => {
-    if (!client) return;
-    setIsProcessing(true);
-    const counterValue = await client.getCounter();
-    setIsProcessing(false);
-    if (counterValue !== null) {
-      toast.success(`Dongle handshake successful! Counter: ${counterValue}`);
-      setCurrentStep(2);
-    } else {
-      toast.error("Dongle handshake failed. Check logs.");
+    try {
+      await dongle.connect();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to connect: ${message}`);
     }
   };
 
-  // Step 2: Read UUID (Mock for now as per plan gap)
+  const handleTestConnection = async () => {
+    if (!dongle.client) return;
+    setIsProcessing(true);
+    try {
+      const counterValue = await dongle.client.getCounter();
+      if (counterValue !== null) {
+        toast.success(`Dongle handshake successful! Counter: ${counterValue}`);
+        setCurrentStep(2);
+      } else {
+        toast.error("Dongle handshake failed. Check logs.");
+      }
+    } catch {
+      toast.error("Dongle handshake failed. Check logs.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Step 2: Read UUID (Manual)
   const handleReadUUID = () => {
     toast.info("Please use the Target Device controls below to read the UUID manually.");
@@ -72,77 +71,45 @@ export function LicenseFlow() {
 
   // Target Device Connection
   const handleConnectTarget = async () => {
-      const client = new TargetDeviceClient((log) => {
-          // Adapt log to UI
-          if (log.type === 'tx' || log.type === 'rx') {
-             // Extract hex from message? "(64 bytes) [80] [00 ...]"
-             setTargetLogs(prev => [...prev, {
-                 direction: log.type as 'tx' | 'rx',
-                 data: log.message, 
-                 time: new Date(log.timestamp).toLocaleTimeString()
-             }]);
-          } else {
-              if (log.type === 'error') toast.error(log.message);
-              if (log.type === 'success') toast.success(log.message);
-          }
-      });
-
-      try {
-          await client.connect();
-          setTargetClient(client);
-          toast.success(`Connected to Target Device`);
-      } catch (err: any) {
-          toast.error(`Failed to connect: ${err.message}`);
-      }
+    try {
+      await target.connect();
+      toast.success(`Connected to Target Device`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to connect: ${message}`);
+    }
   };
 
   const handleDisconnectTarget = async () => {
-      if (targetClient) {
-          await targetClient.disconnect();
-          setTargetClient(null);
-          toast.success("Target Device Disconnected");
-      }
+    await target.disconnect();
+    toast.success("Target Device Disconnected");
   };
 
   const handleSendReport = async () => {
-      if (!targetClient) return;
-      try {
-          const id = parseInt(reportIdInput, 16);
-          const data = fromHex(reportDataInput.replace(/\s/g, ''));
-          await targetClient.sendReport(id, data);
-          toast.success("Report Sent");
-      } catch (e: any) {
-          toast.error("Send Failed: " + e.message);
-      }
+    if (!target.client) return;
+    try {
+      const id = parseInt(reportIdInput, 16);
+      const data = fromHex(reportDataInput.replace(/\s/g, ''));
+      await target.client.sendReport(id, data);
+      toast.success("Report Sent");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error("Send Failed: " + message);
+    }
   };
 
   const handleSendFeatureReport = async () => {
-      if (!targetClient) return;
-      try {
-          const id = parseInt(featureReportIdInput, 16);
-          const data = fromHex(featureReportDataInput.replace(/\s/g, ''));
-          await targetClient.sendFeatureReport(id, data);
-          toast.success("Feature Report Sent");
-      } catch (e: any) {
-          toast.error("Send Feature Report Failed: " + e.message);
-      }
+    if (!target.client) return;
+    try {
+      const id = parseInt(featureReportIdInput, 16);
+      const data = fromHex(featureReportDataInput.replace(/\s/g, ''));
+      await target.client.sendFeatureReport(id, data);
+      toast.success("Feature Report Sent");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error("Send Feature Report Failed: " + message);
+    }
   };
-
-  // Feature report not implemented in AbstractHIDClient yet.
-  // We should add it or cast access. 
-  // For now let's skip refactoring feature report or add it to Base.
-  // I will add it to Base in next step if needed, or just comment out for now as user didn't ask for feature report explicitly in refactor, but code needs it.
-  // Actually, I can allow access to raw device? No, better add to base.
-  // I will skip this block replacement and do it via raw device access if I expose it, or I'll add it to Base.
-  // Let's add `sendFeatureReport` to `AbstractHIDClient` later. For now, I'll access protected device? No.
-  // I will leave this function BROKEN for a moment or try to cast.
-  // BETTER: Add `sendFeatureReport` to `AbstractHIDClient` in previous file? I can't go back easily.
-  // I will use `(targetClient as any).device.sendFeatureReport` as hack or just fail.
-  // Actually, the user's manual tool uses it.
-  // I will Temporarily disable Feature Report or assume it's there.
-  // Let's modify `hid-client.ts` to add `sendFeatureReport` first?
-  // I will interrupt this change to add `sendFeatureReport` to `hid-client.ts`.
-
 
   const handleConfirmUUID = () => {
     if (uuidInput.length !== 256) { // 128 bytes * 2
@@ -154,29 +121,29 @@ export function LicenseFlow() {
 
   // Step 3: Generate License
   const handleGenerateLicense = async () => {
-    if (!client) return;
+    if (!dongle.client) return;
     setIsProcessing(true);
     try {
         const uuidBytes = fromHex(uuidInput);
         
         toast.message("Sending UUID to Dongle...", { description: "128 bytes in 3 chunks" });
-        await client.sendFragmentedData(uuidBytes);
+        await dongle.client.sendFragmentedData(uuidBytes);
         
         toast.message("Waiting for License...", { description: "Reading 256 bytes..." });
-        const licenseBuffer = await client.receiveFragmentedData();
+        const licenseBuffer = await dongle.client.receiveFragmentedData();
         
         const licenseHex = toHex(licenseBuffer);
         setLicenseData(licenseHex);
         toast.success("License Generated Successfully!");
         setCurrentStep(4);
-    } catch (e: any) {
-        toast.error("License Generation Failed: " + e.message);
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        toast.error("License Generation Failed: " + message);
     } finally {
         setIsProcessing(false);
     }
   };
 
-  // Step 4: Write License (Mock)
   // Step 4: Write License (Manual)
   const handleWriteLicense = () => {
      toast.info("Please use the Target Device controls below to write the license manually.");
@@ -188,6 +155,9 @@ export function LicenseFlow() {
     { id: 3, title: "Generate License", icon: FileJson },
     { id: 4, title: "Write License", icon: ArrowRight },
   ];
+
+  // Filter logs by device type for the target logs tab
+  const targetLogs = logs.filter(log => log.message.startsWith('[Target]'));
 
   return (
     <div className="space-y-6">
@@ -231,21 +201,21 @@ export function LicenseFlow() {
             {currentStep === 1 && (
                 <div className="space-y-4">
                     <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
-                        <div className={`w-3 h-3 rounded-full ${connectionState.isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <div className={`w-3 h-3 rounded-full ${dongle.connectionState.isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
                         <div className="flex-1">
-                            <p className="font-medium">Status: {connectionState.isConnected ? 'Connected' : 'Disconnected'}</p>
-                            {connectionState.device && <p className="text-xs text-muted-foreground">{connectionState.device.productName}</p>}
-                            {connectionState.error && <p className="text-xs text-red-500">{connectionState.error}</p>}
+                            <p className="font-medium">Status: {dongle.connectionState.isConnected ? 'Connected' : 'Disconnected'}</p>
+                            {dongle.connectionState.device && <p className="text-xs text-muted-foreground">{dongle.connectionState.device.productName}</p>}
+                            {dongle.connectionState.error && <p className="text-xs text-red-500">{dongle.connectionState.error}</p>}
                         </div>
-                        {!connectionState.isConnected ? (
+                        {!dongle.connectionState.isConnected ? (
                             <Button onClick={handleConnect}>Select Device</Button>
                         ) : (
-                            <Button variant="outline" onClick={disconnect}>Disconnect</Button>
+                            <Button variant="outline" onClick={dongle.disconnect}>Disconnect</Button>
                         )}
                     </div>
                     
                     <Button 
-                        disabled={!connectionState.isConnected || isProcessing} 
+                        disabled={!dongle.connectionState.isConnected || isProcessing} 
                         onClick={handleTestConnection} 
                         className="w-full"
                     >
@@ -260,7 +230,7 @@ export function LicenseFlow() {
                 <div className="space-y-4">
                     <div className="flex gap-2">
                         <Button variant="secondary" onClick={handleReadUUID} className="flex-1">
-                            Mock Read from Device
+                            Read from Device
                         </Button>
                     </div>
                     <div className="space-y-2">
@@ -346,18 +316,18 @@ export function LicenseFlow() {
           </CardHeader>
           <CardContent className="space-y-4">
               <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
-                  <div className={`w-3 h-3 rounded-full ${targetClient ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <div className={`w-3 h-3 rounded-full ${target.connectionState.isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
                   <div className="flex-1">
-                      <p className="font-medium">Status: {targetClient ? `Connected` : 'Disconnected'}</p>
+                      <p className="font-medium">Status: {target.connectionState.isConnected ? `Connected` : 'Disconnected'}</p>
                   </div>
-                  {!targetClient ? (
+                  {!target.connectionState.isConnected ? (
                       <Button onClick={handleConnectTarget}>Connect Target Device</Button>
                   ) : (
                       <Button variant="outline" onClick={handleDisconnectTarget}>Disconnect</Button>
                   )}
               </div>
 
-              {targetClient && (
+              {target.connectionState.isConnected && (
                   <div className="space-y-4">
                       <div className="flex space-x-2 border-b pb-2">
                           <Button 
@@ -418,17 +388,17 @@ export function LicenseFlow() {
                       {activeTab === 'logs' && (
                           <div>
                               <ScrollArea className="h-[200px] w-full rounded-md border p-4">
-                                  {targetLogs.map((log, i) => (
-                                      <div key={i} className="text-xs font-mono mb-1">
-                                          <span className="text-muted-foreground">[{log.time}]</span>
-                                          <span className={log.direction === 'tx' ? 'text-blue-500' : 'text-green-500'}>
-                                              {log.direction === 'tx' ? ' -> ' : ' <- '}
+                                  {targetLogs.map((log) => (
+                                      <div key={log.id} className="text-xs font-mono mb-1">
+                                          <span className="text-muted-foreground">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                                          <span className={log.type === 'tx' ? 'text-blue-500' : 'text-green-500'}>
+                                              {log.type === 'tx' ? ' -> ' : ' <- '}
                                           </span>
-                                          {log.data}
+                                          {log.message.replace('[Target] ', '')}
                                       </div>
                                   ))}
                               </ScrollArea>
-                              <Button variant="ghost" size="sm" onClick={() => setTargetLogs([])} className="mt-2">Clear Logs</Button>
+                              <Button variant="ghost" size="sm" onClick={clearLogs} className="mt-2">Clear Logs</Button>
                           </div>
                       )}
                   </div>
