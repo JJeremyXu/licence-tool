@@ -1,11 +1,11 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
-import { HIDClient } from './hid-client';
+import { DongleClient } from './hid-client';
 import { LogEntry, DeviceConnectionState } from './types';
 
 interface HIDContextType {
-  client: HIDClient | null;
+  client: DongleClient | null;
   connectionState: DeviceConnectionState;
   logs: LogEntry[];
   connect: () => Promise<void>;
@@ -25,11 +25,11 @@ export const HIDProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     error: null,
   });
   
-  const clientRef = useRef<HIDClient | null>(null);
+  const clientRef = useRef<DongleClient | null>(null);
 
   // Initialize client once
   useEffect(() => {
-    clientRef.current = new HIDClient((log) => {
+    clientRef.current = new DongleClient((log) => {
       setLogs(prev => [...prev, log]);
     });
   }, []);

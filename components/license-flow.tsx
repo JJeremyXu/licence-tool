@@ -11,6 +11,7 @@ import { Loader2, Check, Usb, Key, FileJson, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
+import { TargetDeviceClient } from '@/lib/hid/hid-client';
 
 // Helper to format hex string
 const toHex = (data: Uint8Array) => Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -32,21 +33,18 @@ export function LicenseFlow() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Target Device State
-  const [targetDevice, setTargetDevice] = useState<HIDDevice | null>(null);
+  // We use TargetDeviceClient to wrap the device interaction including logging
+  const [targetClient, setTargetClient] = useState<TargetDeviceClient | null>(null);
+  // We can still use local logs or rely on the client's callback. 
+  // The client callback approach is cleaner.
   const [targetLogs, setTargetLogs] = useState<{direction: 'tx' | 'rx', data: string, time: string}[]>([]);
   const [reportIdInput, setReportIdInput] = useState('00');
   const [reportDataInput, setReportDataInput] = useState('');
   const [featureReportIdInput, setFeatureReportIdInput] = useState('00');
   const [featureReportDataInput, setFeatureReportDataInput] = useState('');
   const [activeTab, setActiveTab] = useState<'report' | 'feature' | 'logs'>('report');
+  // Helper functions for logging removed as we use client callback directly in handler
 
-  const addToLog = (direction: 'tx' | 'rx', data: string) => {
-      setTargetLogs(prev => [...prev, {
-          direction,
-          data,
-          time: new Date().toLocaleTimeString()
-      }]);
-  };
 
   // Step 1: Connection
   const handleConnect = async () => {
@@ -74,41 +72,44 @@ export function LicenseFlow() {
 
   // Target Device Connection
   const handleConnectTarget = async () => {
-      try {
-          const devices = await navigator.hid.requestDevice({ filters: [] });
-          if (devices.length > 0) {
-              const device = devices[0];
-              await device.open();
-              setTargetDevice(device);
-              toast.success(`Connected to ${device.productName}`);
-
-              device.addEventListener('inputreport', (e) => {
-                  const { data, reportId } = e;
-                  const bytes = new Uint8Array(data.buffer);
-                  const hex = toHex(bytes);
-                  addToLog('rx', `[ID:${reportId}] ${hex}`);
-              });
+      const client = new TargetDeviceClient((log) => {
+          // Adapt log to UI
+          if (log.type === 'tx' || log.type === 'rx') {
+             // Extract hex from message? "(64 bytes) [80] [00 ...]"
+             setTargetLogs(prev => [...prev, {
+                 direction: log.type as 'tx' | 'rx',
+                 data: log.message, 
+                 time: new Date(log.timestamp).toLocaleTimeString()
+             }]);
+          } else {
+              if (log.type === 'error') toast.error(log.message);
+              if (log.type === 'success') toast.success(log.message);
           }
+      });
+
+      try {
+          await client.connect();
+          setTargetClient(client);
+          toast.success(`Connected to Target Device`);
       } catch (err: any) {
           toast.error(`Failed to connect: ${err.message}`);
       }
   };
 
   const handleDisconnectTarget = async () => {
-      if (targetDevice) {
-          await targetDevice.close();
-          setTargetDevice(null);
+      if (targetClient) {
+          await targetClient.disconnect();
+          setTargetClient(null);
           toast.success("Target Device Disconnected");
       }
   };
 
   const handleSendReport = async () => {
-      if (!targetDevice) return;
+      if (!targetClient) return;
       try {
           const id = parseInt(reportIdInput, 16);
           const data = fromHex(reportDataInput.replace(/\s/g, ''));
-          await targetDevice.sendReport(id, data);
-          addToLog('tx', `[ID:${id}] ${toHex(data)}`);
+          await targetClient.sendReport(id, data);
           toast.success("Report Sent");
       } catch (e: any) {
           toast.error("Send Failed: " + e.message);
@@ -116,17 +117,32 @@ export function LicenseFlow() {
   };
 
   const handleSendFeatureReport = async () => {
-    if (!targetDevice) return;
-    try {
-        const id = parseInt(featureReportIdInput, 16);
-        const data = fromHex(featureReportDataInput.replace(/\s/g, ''));
-        await targetDevice.sendFeatureReport(id, data);
-        addToLog('tx', `[Feature ID:${id}] ${toHex(data)}`);
-        toast.success("Feature Report Sent");
-    } catch (e: any) {
-        toast.error("Send Failed: " + e.message);
-    }
+      if (!targetClient) return;
+      try {
+          const id = parseInt(featureReportIdInput, 16);
+          const data = fromHex(featureReportDataInput.replace(/\s/g, ''));
+          await targetClient.sendFeatureReport(id, data);
+          toast.success("Feature Report Sent");
+      } catch (e: any) {
+          toast.error("Send Feature Report Failed: " + e.message);
+      }
   };
+
+  // Feature report not implemented in AbstractHIDClient yet.
+  // We should add it or cast access. 
+  // For now let's skip refactoring feature report or add it to Base.
+  // I will add it to Base in next step if needed, or just comment out for now as user didn't ask for feature report explicitly in refactor, but code needs it.
+  // Actually, I can allow access to raw device? No, better add to base.
+  // I will skip this block replacement and do it via raw device access if I expose it, or I'll add it to Base.
+  // Let's add `sendFeatureReport` to `AbstractHIDClient` later. For now, I'll access protected device? No.
+  // I will leave this function BROKEN for a moment or try to cast.
+  // BETTER: Add `sendFeatureReport` to `AbstractHIDClient` in previous file? I can't go back easily.
+  // I will use `(targetClient as any).device.sendFeatureReport` as hack or just fail.
+  // Actually, the user's manual tool uses it.
+  // I will Temporarily disable Feature Report or assume it's there.
+  // Let's modify `hid-client.ts` to add `sendFeatureReport` first?
+  // I will interrupt this change to add `sendFeatureReport` to `hid-client.ts`.
+
 
   const handleConfirmUUID = () => {
     if (uuidInput.length !== 256) { // 128 bytes * 2
@@ -330,18 +346,18 @@ export function LicenseFlow() {
           </CardHeader>
           <CardContent className="space-y-4">
               <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
-                  <div className={`w-3 h-3 rounded-full ${targetDevice ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <div className={`w-3 h-3 rounded-full ${targetClient ? 'bg-green-500' : 'bg-red-500'}`} />
                   <div className="flex-1">
-                      <p className="font-medium">Status: {targetDevice ? `Connected: ${targetDevice.productName}` : 'Disconnected'}</p>
+                      <p className="font-medium">Status: {targetClient ? `Connected` : 'Disconnected'}</p>
                   </div>
-                  {!targetDevice ? (
+                  {!targetClient ? (
                       <Button onClick={handleConnectTarget}>Connect Target Device</Button>
                   ) : (
                       <Button variant="outline" onClick={handleDisconnectTarget}>Disconnect</Button>
                   )}
               </div>
 
-              {targetDevice && (
+              {targetClient && (
                   <div className="space-y-4">
                       <div className="flex space-x-2 border-b pb-2">
                           <Button 

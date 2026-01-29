@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useHID } from '@/lib/hid/hid-context';
-import { MockDeviceClient } from '@/lib/hid/mock-device-client';
+
+import { TargetDeviceClient } from '@/lib/hid/hid-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +17,7 @@ type ProcessStep = 'idle' | 'get-uuid' | 'get-counter' | 'generate-license' | 'w
 
 export default function AutoLicensePage() {
   const { connect, connectionState, client } = useHID();
-  const [mockDevice, setMockDevice] = useState<MockDeviceClient | null>(null);
+  const [mockDevice, setMockDevice] = useState<TargetDeviceClient | null>(null);
   const [counter, setCounter] = useState<number | null>(null);
   const [currentStep, setCurrentStep] = useState<ProcessStep>('idle');
   const [progress, setProgress] = useState(0);
@@ -34,19 +35,19 @@ export default function AutoLicensePage() {
       toast.error('Failed to connect Dongle: ' + error.message);
     }
   };
-
   const handleConnectDevice = async () => {
-    // Get the log handler from HID context (we need to expose it)
-    // For now, create mock with inline logging until we refactor context
-    const mock = new MockDeviceClient((log) => {
-      // This will appear in console but not in UI debug console yet
-      // We'll need to enhance HID context to support multiple log sources
-      console.log('[Mock Device]', log);
+    // For now, create client with inline logging until we refactor context
+    const target = new TargetDeviceClient((log) => {
+      console.log('[Target Device]', log);
     });
     
-    await mock.connect();
-    setMockDevice(mock);
-    toast.success('Target Device connected (Mock)');
+    try {
+        await target.connect();
+        setMockDevice(target);
+        toast.success('Target Device connected');
+    } catch (e: any) {
+        toast.error('Failed to connect Target Device: ' + e.message);
+    }
   };
 
   const handleCheckCounter = useCallback(async () => {
@@ -90,7 +91,7 @@ export default function AutoLicensePage() {
       // Step 1: Get UUID from Device
       setCurrentStep('get-uuid');
       setProgress(25);
-      toast.info('Step 1: Reading UUID from device...');
+      toast.info('Step 1: Reading UUID from device (0x80 -> 0x81)...');
       const deviceUuid = await mockDevice.readUUID();
       setUuid(deviceUuid);
 
@@ -199,7 +200,7 @@ export default function AutoLicensePage() {
                 <span className="text-sm">Status:</span>
                 <Badge variant={mockDevice ? 'default' : 'secondary'}>
                   {mockDevice ? (
-                    <><CheckCircle2 className="w-3 h-3 mr-1" /> Connected (Mock)</>
+                    <><CheckCircle2 className="w-3 h-3 mr-1" /> Connected</>
                   ) : (
                     <><XCircle className="w-3 h-3 mr-1" /> Disconnected</>
                   )}
