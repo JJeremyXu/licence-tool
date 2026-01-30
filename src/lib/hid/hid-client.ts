@@ -25,7 +25,7 @@ export abstract class AbstractHIDClient {
   }
 
   protected logPacket(type: 'tx' | 'rx', reportId: number, data: Uint8Array) {
-    const totalLen = data.byteLength + 1; 
+    const totalLen = data.byteLength; 
     const idHex = reportId.toString(16).padStart(2, '0').toUpperCase();
     const dataHex = Array.from(data).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
     
@@ -197,46 +197,33 @@ export class DongleClient extends AbstractHIDClient {
 export class TargetDeviceClient extends AbstractHIDClient {
   protected readonly deviceName = 'Target';
     
-  // Connect to ANY device (no filter)
+  // Connect to Target Device with specific USB filter
   async connect(): Promise<HIDDevice> {
-    return super.connect([]);
+    return super.connect([{ 
+      vendorId: HID_CONSTANTS.TARGET_VENDOR_ID, 
+      productId: HID_CONSTANTS.TARGET_PRODUCT_ID 
+    }]);
   }
 
   async readUUID(): Promise<Uint8Array> {
     this.log('info', 'Sending UUID Request (0x80)...');
     
-    const reportOut = new Uint8Array(63).fill(0);
-    await this.sendReport(0x80, reportOut);
+    // Send request with empty data
+    const reportOut = new Uint8Array(0);
+    await this.sendReport(HID_CONSTANTS.TARGET_REPORT_ID.GET_UUID_REQUEST, reportOut);
+    
     this.log('info', 'Waiting for UUID Response (0x81)...');
     
-    const uuidBuffer = new Uint8Array(128);
-    let bytesRead = 0;
+    // Expect 128 bytes UUID in response
+    const response = await this.receivePacket(HID_CONSTANTS.TARGET_REPORT_ID.GET_UUID_RESPONSE, 2000);
     
-    while (bytesRead < 128) {
-      try {
-        const packet = await this.receivePacket(0x81, 2000);
-        
-        if (packet.byteLength >= 128 && bytesRead === 0) {
-          return packet.slice(0, 128);
-        }
-        
-        const toCopy = Math.min(packet.byteLength, 128 - bytesRead);
-        uuidBuffer.set(packet.slice(0, toCopy), bytesRead);
-        bytesRead += toCopy;
-        
-      } catch (e) {
-        if (bytesRead === 0) throw e;
-        break; 
-      }
-    }
-    
-    if (bytesRead < 128) {
-      this.log('error', `UUID read incomplete: got ${bytesRead}/128 bytes`);
-      return uuidBuffer.slice(0, bytesRead);
+    if (response.byteLength < 128) {
+      this.log('error', `UUID read incomplete: got ${response.byteLength}/128 bytes`);
+      throw new Error(`UUID must be 128 bytes (got ${response.byteLength})`);
     }
     
     this.log('success', 'UUID Read Complete');
-    return uuidBuffer;
+    return response.slice(0, 128);
   }
 
   async writeLicense(license: Uint8Array): Promise<void> {
@@ -244,19 +231,9 @@ export class TargetDeviceClient extends AbstractHIDClient {
       throw new Error(`License must be 256 bytes (got ${license.length})`);
     }
 
-    this.log('info', 'Writing License (0x82)...');
+    this.log('info', 'Writing License (0x82) - 256 bytes in one send...');
     
-    let offset = 0;
-    while (offset < license.length) {
-      const chunk = license.slice(offset, offset + 63);
-      const reportData = new Uint8Array(63);
-      reportData.set(chunk, 0); 
-      
-      offset += chunk.length;
-      
-      await this.sendReport(0x82, reportData);
-      await new Promise(r => setTimeout(r, 20));
-    }
+    await this.sendReport(HID_CONSTANTS.TARGET_REPORT_ID.STORE_LICENSE, license);
     
     this.log('success', 'License Write Complete');
   }
